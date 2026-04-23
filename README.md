@@ -1,165 +1,174 @@
-# IGV_With_BareMetalOS
-# Intelligent Guided Vehicle (IGV) Project
+# Intelligent Guided Vehicle (IGV) on BareMetal OS
 
-## Overview
+This repository contains embedded firmware for an agriculture-oriented Intelligent Guided Vehicle (IGV).  
+The platform combines STM32 motor/servo control with ESP32 mesh coordination and a custom BareMetal OS scheduler.
 
-The Intelligent Guided Vehicle (IGV) project involves developing an autonomous vehicle designed for agriculture-based activities like seeding and crop cutting. The system utilizes modern AI and embedded electronics to operate effectively. This project is implemented using the BareMetal OS (BMOS) on STM32 microcontrollers.
+## 1) Project Scope
 
-## Hardware
+The repository has three major codebases:
 
-- **Microcontroller:** STM32F407G DISC-1
-- **Other Components:**
-  - Raspberry Pi 4
-  - ESP32
-  - Motors
-  - Sensors
-  - Servos
+- `IGV_V1.2` - Main IGV firmware for `STM32F407` (CubeIDE project, motor + servo + UART command handling).
+- `BareMetalOS_1_7` - BareMetal scheduler and synchronization testbed for `STM32F446`.
+- `ESP32/Mesh_node3_V16` - ESP32 mesh control node (`.ino`) handling command broadcast, telemetry parsing, and auto-mode sequencing.
 
-## Software
+## 2) Core Capabilities
 
-- **Embedded Software:**
-  - STM32CubeIDE
-  - Arduino IDE
-  - [BareMetal OS ](https://github.com/Omkar7637/STM32-BareMetalOS-Crafting-from-Scratch/blob/main/README.md).
-  - C Programming
-- **Programming Languages:**
-  - C
-  - Python
+- BareMetal task scheduling (`BMOS_CreateTask`, `BMOS_StartScheduler`, `BMOS_Delay`).
+- DC motor direction control through GPIO.
+- 4-channel PWM steering/actuation through `TIM3`.
+- UART command receive/transmit interrupt workflow on STM32.
+- ESP32 mesh communication using JSON payloads.
+- Auto coverage logic on ESP32 using configurable `Length`/`Width` and turn counting.
 
-## Project Structure
+## 3) Hardware and Tools
 
-### Source Code
+### Hardware
 
-The main source code for the project is contained in `main.c`. Below is a brief overview of the code:
+- `STM32F407G-DISC1` (primary IGV control firmware).
+- `STM32F446RE` board (BareMetalOS experiments/reference).
+- ESP32 nodes (mesh network).
+- Motor driver + DC motors + servo assemblies.
+- Push buttons and status LED / NeoPixel.
 
-#### Includes and Defines
+### Software
 
-- **osKernel.c:** Contains the Bare Metal OS kernel code.
-- **string.h, stdio.h:** Standard libraries for string operations and formatted I/O.
-- **GPIO and Timer Definitions:** Configure ports and pins for motor and servo control.
+- STM32CubeIDE (project import, build, flash, debug).
+- ST-LINK (for STM32 debug/flash).
+- Arduino IDE or compatible ESP32 toolchain.
+- ESP32 libraries:
+  - `painlessMesh`
+  - `Arduino_JSON`
+  - `Adafruit_NeoPixel`
 
-#### Private Variables
+## 4) High-Level Architecture
 
-Used for motor and servo control, UART communication, and task state management.
-
-#### Function Prototypes
-
-Prototypes for initialization functions and task functions.
-
-### Main Function
-
-#### Initialization:
-
-```c
-HAL_Init();
-SystemClock_Config();
-MX_GPIO_Init();
-MX_TIM3_Init();
-MX_USART2_UART_Init();
-```
-Initializes HAL library, system clock, GPIO, timers, and UART.
-
-##### Task Creation:
-```c
-BMOS_CreateTask(PulseLEDTask, "PulseLED", 128, NULL, 5);
-BMOS_CreateTask(DCMotorTask, "DCMotor", 128, NULL, 5);
-BMOS_CreateTask(LED4Task, "LED4", 128, NULL, 5);
-BMOS_CreateTask(Servo1Task, "Servo1", 128, NULL, 5);
-```
-Creates four tasks with specified priorities and stack sizes.
-
-##### Scheduler Start:
-```c
-BMOS_StartScheduler();
-```
-Starts the Bare Metal OS scheduler.
-
-##### Infinite Loop:
-```c
-Copy code
-while (1) {
-    /* Your main loop code here */
-}
+```mermaid
+flowchart LR
+  HOST[Operator / Host] -->|Serial Commands| STM32[STM32 IGV_V1.2]
+  STM32 -->|GPIO| MOTOR[Motor Driver + DC Motors]
+  STM32 -->|PWM TIM3 CH1..CH4| SERVO[Servo Actuation]
+  ESP3[ESP32 Mesh Node 3] -->|JSON Broadcast| MESH[Other ESP32 Nodes]
+  ESP3 -->|Coordination Data| STM32
+  BMOS[BareMetalOS_1_7] -. kernel reference .-> STM32
 ```
 
-Task Functions
+## 5) Repository Layout
 
-#####PulseLEDTask:
-```c
-
-void PulseLEDTask(void) {
-    while (1) {
-        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 1);
-        BMOS_Delay(1000);
-        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, 0);
-        BMOS_Delay(1000);
-    }
-}
+```text
+.
+|-- README.md
+|-- docs/
+|   `-- media/README.md
+|-- IGV_V1.2/
+|   |-- Core/
+|   |-- Drivers/
+|   |-- Middlewares/          # includes FreeRTOS middleware tree
+|   |-- Debug/                # generated build outputs
+|   |-- IGV_V1.2.ioc
+|   `-- IGV_V1.2 Debug.launch
+|-- BareMetalOS_1_7/
+|   |-- Src/
+|   |-- Inc/
+|   |-- Debug/
+|   |-- V1_7.ioc
+|   `-- V1_7.launch
+|-- ESP32/
+|   `-- Mesh_node3_V16/
+|       `-- Mesh_node3_V16.ino
+`-- Chip_headers/
 ```
 
-Blinks an LED on GPIOD Pin 15 with a 1-second interval.
+## 6) Detailed Firmware Behavior
 
-##### Servo1Task:
-```c
+### `IGV_V1.2` (STM32F407 main firmware)
 
-void Servo1Task(void) {
-    while (1) {
-        if (srm_cmd >= 21 && srm_cmd <= 23) {
-            // Adjust servo positions based on command
-        }
-        // Update PWM values for servos
-        __HAL_TIM_SET_COMPARE(&Dir_Servo_Tmr, Servo_R_F, Servo_R_F_POS);
-        // More PWM updates...
-        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, 1);
-        BMOS_Delay(1000);
-        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, 0);
-        BMOS_Delay(1000);
-    }
-}
-```
+Boot sequence:
 
-Controls servo positions and blinks an LED based on servo operations.
+1. HAL initialization.
+2. System clock setup.
+3. GPIO init.
+4. `TIM3` init + PWM start on 4 channels.
+5. `USART2` init at `115200`.
+6. UART RX interrupt start (3-byte command frame).
+7. Create BMOS tasks and start scheduler.
 
-##### LED4Task:
-```c
-void LED4Task(void) {
-    while (1) {
-        if (MainCMD <= 20) {
-            dcm_cmd = MainCMD;
-        } else if (MainCMD >= 20 && MainCMD <= 35) {
-            srm_cmd = MainCMD;
-        }
-        BMOS_Delay(1);
-    }
-}
-```
+Main tasks:
 
-Updates commands for DC motors and servos based on UART input.
+- `PulseLEDTask` - periodic heartbeat LED.
+- `DCMotorTask` - maps `dcm_cmd` to motor GPIO direction pins.
+- `LED4Task` - routes `MainCMD` into `dcm_cmd` or `srm_cmd`.
+- `Servo1Task` - updates servo compare values and steering progression.
 
-##### DCMotorTask:
-```c
-void DCMotorTask(void) {
-    while (1) {
-        HAL_GPIO_WritePin(Motor_EN_Port, M_R_EN_A | M_R_EN_B | M_L_EN_A | M_L_EN_B, 1);
-        // Control DC motor based on dcm_cmd
-        // Update GPIO pins to control motor direction
-        BMOS_Delay(1000);
-    }
-}
-```
-Controls DC motors based on received commands.
+Interrupt callbacks:
 
-Initialization Functions
-- **MX_TIM3_Init:** Configures Timer 3 for PWM signal generation, used for controlling servos.
-- **MX_USART2_UART_Init:** Sets up UART for communication.
-- **MX_GPIO_Init:** Initializes GPIO pins used for various controls.
-  
-Error Handling and Callbacks
-- **HAL_UART_RxCpltCallback:** Handles UART receive complete interrupt, processes commands.
-- **HAL_TIM_PeriodElapsedCallback:** Increments a global tick counter on Timer 2 interrupts.
-- **Error_Handler:** Handles errors by halting execution.
-  
-Summary
-The code uses the Bare Metal OS to manage tasks in the STM32 microcontroller. It sets up GPIO, timers, and UART, then creates and schedules tasks for LED pulsing, servo control, DC motor control, and command processing. The system operates efficiently with task switching managed by the Bare Metal OS, ensuring real-time performance for the Intelligent Guided Vehicle (IGV).
+- `HAL_UART_RxCpltCallback` - parses command and echoes response.
+- `HAL_TIM_PeriodElapsedCallback` - tick maintenance (`TIM2`).
 
-####
+### `BareMetalOS_1_7` (kernel test project)
+
+- Initializes UART and timer interrupt.
+- Demonstrates thread creation (`osKernelAddThreads`, `osKernelAddThread`).
+- Uses semaphores (`osSemaphoreInit`, `osSemaphoreWait`, `osSemaphoreSet`).
+- Contains profiler counters for task behavior observation.
+
+### `ESP32/Mesh_node3_V16`
+
+- Initializes mesh and periodic broadcast task.
+- Sends local status/command JSON to mesh.
+- Parses remote telemetry fields (`ROBOT_ESP1_*`, `ROBOT_ESP2_*`).
+- Supports manual commands and auto planner mode.
+- Uses NeoPixel red/green to show network/activation state.
+
+## 7) Command Mapping
+
+### STM32 (`IGV_V1.2`)
+
+- `MainCMD <= 20` -> treated as motor command (`dcm_cmd`).
+- `20 <= MainCMD <= 35` -> treated as servo command (`srm_cmd`).
+
+Observed motor examples:
+
+- `dcm_cmd = 1` / `2` / `3` -> right front motor direction variants.
+- `dcm_cmd = 4` / `5` / `6` -> right rear motor direction variants.
+
+Observed servo example:
+
+- `srm_cmd = 21..23` -> servo operation path in `Servo1Task`.
+
+### ESP32 (`Mesh_node3_V16`)
+
+- `0` -> reset/stop style command state.
+- `1..8` -> direct turn-side command group (`Esp2TDcmd` path).
+- `11..19` -> forward command group (`Esp1Fcmd = cmd - 10`).
+- `21..29` -> turn command group (`Esp1Tcmd`, `Esp2Tcmd = cmd - 20`).
+- `100..199` -> turn-count command (`Esp1TCntcmd = cmd - 100`).
+- `200..999` -> forward-count command (`Esp1FCntcmd = cmd`).
+- `1001..1999` -> set field length (`Length = cmd - 1000`).
+- `2001..2999` -> set field width (`Width = cmd - 2000`).
+- `5000` -> special state.
+- `5001` -> auto mode operation.
+- `5002` -> auto completion/termination state.
+
+## 8) Build and Flash
+
+### STM32 Projects (`IGV_V1.2`, `BareMetalOS_1_7`)
+
+1. Open STM32CubeIDE.
+2. Import both project directories as existing projects.
+3. Select `Debug` configuration.
+4. Build (`Project -> Build Project`).
+5. Connect target board over ST-LINK.
+6. Flash/debug using provided `.launch` files or `Debug As -> STM32 Cortex-M C/C++ Application`.
+
+### ESP32 Project
+
+1. Open `ESP32/Mesh_node3_V16/Mesh_node3_V16.ino` in Arduino IDE.
+2. Install required libraries.
+3. Select board and serial port.
+4. Upload and monitor at `115200` baud.
+
+## 9) Related Link
+
+- BareMetal OS reference: [STM32-BareMetalOS-Crafting-from-Scratch](https://github.com/Omkar7637/STM32-BareMetalOS-Crafting-from-Scratch/blob/main/README.md)
+
+## 10) License
